@@ -202,7 +202,11 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
       {r.cardStatus === 'B' && r.action_label && (
         <div className="mt-3 bg-blue-50 rounded-xl px-3 py-2.5">
           <p className="text-xs font-medium text-blue-700 mb-1">刷卡前要做</p>
-          <p className="text-xs text-blue-800">{r.action_label}</p>
+          <p className="text-xs text-blue-800">
+            {r.exclusive_group_key === 'richart_daily_plan'
+              ? r.action_label.replace('對應方案', `「${r.rule_name}」`)
+              : r.action_label}
+          </p>
         </div>
       )}
 
