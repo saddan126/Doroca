@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 
 type RawCard = {
   card_name: string
+  foreign_transaction_fee_rate: number | null
   banks: { bank_name: string } | null
 } | null
 
@@ -23,6 +24,7 @@ export type MatchedRule = {
   new_customer_check_mode: string
   extra_conditions_json: Record<string, unknown> | null
   min_spending: number
+  foreign_transaction_fee_rate: number
   applicable_merchants: string | null
   source_url: string | null
   valid_from: string | null
@@ -43,6 +45,8 @@ export type ScoredRule = {
   rule_name: string
   reward_type: string
   theoreticalRewardTwd: number
+  netRewardTwd: number
+  foreignFeeDeducted: number
   effectiveRewardRate: number
   capNeedsUserConfirmation: boolean
   requiresRegistration: boolean
@@ -97,7 +101,7 @@ export async function matchRules(
       extra_conditions_json, min_spending,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
-      cards ( card_name, banks ( bank_name ) )
+      cards ( card_name, foreign_transaction_fee_rate, banks ( bank_name ) )
     `)
     .in('card_id', heldCardIds)
 
@@ -121,6 +125,7 @@ export async function matchRules(
       card_id: rule.card_id,
       card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
+      foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
@@ -164,7 +169,11 @@ function calcComplexity(rule: MatchedRule): 'low' | 'medium' | 'high' {
   return 'low'
 }
 
-export function scoreRules(rules: MatchedRule[], amount: number): ScoredRule[] {
+const FOREIGN_CATEGORIES = ['foreign_currency', 'travel', 'flight', 'hotel']
+
+export function scoreRules(rules: MatchedRule[], amount: number, category = ''): ScoredRule[] {
+  const isForeign = FOREIGN_CATEGORIES.includes(category)
+
   return rules.map((rule) => {
     let theoretical = 0
 
@@ -173,7 +182,6 @@ export function scoreRules(rules: MatchedRule[], amount: number): ScoredRule[] {
     } else if (rule.reward_type === 'fixed_amount') {
       theoretical = rule.reward_fixed_amount
     } else if (rule.reward_type === 'points') {
-      // 點數先以面值 1:1 換算（後續可調整）
       theoretical = amount * rule.reward_rate
     }
 
@@ -184,6 +192,8 @@ export function scoreRules(rules: MatchedRule[], amount: number): ScoredRule[] {
       theoretical = Math.min(theoretical, rule.reward_cap_amount)
     }
 
+    const feeDeducted = isForeign ? Math.round(amount * rule.foreign_transaction_fee_rate) : 0
+    const net = Math.max(0, Math.round(theoretical) - feeDeducted)
     const effectiveRewardRate = amount > 0 ? theoretical / amount : 0
 
     return {
@@ -194,6 +204,8 @@ export function scoreRules(rules: MatchedRule[], amount: number): ScoredRule[] {
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       theoreticalRewardTwd: Math.round(theoretical),
+      netRewardTwd: net,
+      foreignFeeDeducted: feeDeducted,
       effectiveRewardRate: Math.round(effectiveRewardRate * 10000) / 10000,
       capNeedsUserConfirmation,
       requiresRegistration: rule.requires_registration === 'yes',
@@ -297,29 +309,29 @@ export function generateRecommendations(
 ): Recommendation[] {
   const recs: Recommendation[] = []
 
-  // 1. 最佳實用方案：回饋最高，且複雜度不是 high
+  // 1. 最佳實用方案：淨回饋最高，且複雜度不是 high
   const practical =
     [...scored]
       .filter((r) => r.conditionComplexity !== 'high')
-      .sort((a, b) => b.theoreticalRewardTwd - a.theoreticalRewardTwd)[0] ?? null
+      .sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
   recs.push({ type: 'best_practical', label: '最佳實用方案', rule: practical })
 
-  // 2. 理論最高方案：回饋絕對最高，不管複雜度
+  // 2. 理論最高方案：淨回饋絕對最高，不管複雜度
   const highest =
-    [...scored].sort((a, b) => b.theoreticalRewardTwd - a.theoreticalRewardTwd)[0] ?? null
+    [...scored].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
   recs.push({ type: 'highest_theoretical', label: '理論最高方案', rule: highest })
 
-  // 3. 最穩定方案：無需登錄、無回饋上限、且條件簡單（low），回饋最高
+  // 3. 最穩定方案：無需登錄、無回饋上限、且條件簡單（low），淨回饋最高
   const stable =
     [...scored]
       .filter((r) => !r.requiresRegistration && r.reward_cap_amount === null && r.conditionComplexity === 'low')
-      .sort((a, b) => b.theoreticalRewardTwd - a.theoreticalRewardTwd)[0] ?? null
+      .sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
   recs.push({ type: 'most_stable', label: '最穩定方案', rule: stable })
 
   // 4. 新卡方案：僅在願意辦新卡時顯示
   if (willingToApplyNewCard) {
     const newCard =
-      [...newCardRules].sort((a, b) => b.theoreticalRewardTwd - a.theoreticalRewardTwd)[0] ?? null
+      [...newCardRules].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
     recs.push({ type: 'new_card', label: '新卡方案', rule: newCard })
   }
 
@@ -365,7 +377,7 @@ export async function matchNewCardRules(
       extra_conditions_json, min_spending,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
-      cards ( card_name, banks ( bank_name ) )
+      cards ( card_name, foreign_transaction_fee_rate, banks ( bank_name ) )
     `)
     .in('card_id', newCardIds)
 
@@ -386,6 +398,7 @@ export async function matchNewCardRules(
       card_id: rule.card_id,
       card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
+      foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
@@ -406,7 +419,7 @@ export async function matchNewCardRules(
       source_updated_at: rule.source_updated_at ?? null,
     }))
 
-  return scoreRules(matched, amount).map((r) => ({
+  return scoreRules(matched, amount, category).map((r) => ({
     ...r,
     confirmItems: buildConfirmItems(r),
   }))

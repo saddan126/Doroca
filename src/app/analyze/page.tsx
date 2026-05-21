@@ -156,12 +156,17 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
         <p className="text-xl font-bold text-blue-700">
           {r.reward_type === 'points'
             ? `${r.theoreticalRewardTwd.toLocaleString()} ${(r.extra_conditions_json?.reward_currency as string) ?? '點'}`
-            : `NT$ ${r.theoreticalRewardTwd.toLocaleString()} 回饋`}
+            : `NT$ ${r.netRewardTwd.toLocaleString()} 回饋`}
         </p>
         <p className="text-xs text-blue-500 mt-0.5">
           有效回饋率 {(r.effectiveRewardRate * 100).toFixed(1)}%
           {r.capNeedsUserConfirmation && '（上限需確認）'}
         </p>
+        {r.foreignFeeDeducted > 0 && (
+          <p className="text-xs text-blue-400 mt-0.5">
+            表定回饋 {r.theoreticalRewardTwd.toLocaleString()} 元，已扣除國外手續費 {r.foreignFeeDeducted.toLocaleString()} 元
+          </p>
+        )}
         {getRewardCurrencyInfo(r).isNonCash && (
           <p className="text-xs text-amber-600 mt-1">⚠ 非現金，請確認兌換條件</p>
         )}
@@ -242,7 +247,7 @@ export default function AnalyzePage() {
         : Promise.resolve([]),
     ])
 
-    const scored: ScoredRule[] = scoreRules(rules, amount).map((r) => ({
+    const scored: ScoredRule[] = scoreRules(rules, amount, form.category).map((r) => ({
       ...r,
       confirmItems: buildConfirmItems(r),
     }))
