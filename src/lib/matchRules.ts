@@ -49,6 +49,7 @@ export type ScoredRule = {
   foreignFeeDeducted: number
   contextMatchScore: number
   recommendationScore: number
+  effectiveValueTwd: number | null
   effectiveRewardRate: number
   capNeedsUserConfirmation: boolean
   requiresRegistration: boolean
@@ -215,6 +216,14 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
     const contextMatchScore = calcContextMatchScore(rule.applicable_merchants, category)
     const recommendationScore = Math.max(0, net * contextMatchScore - COMPLEXITY_PENALTY[complexity])
 
+    let effectiveValueTwd: number | null = null
+    if (rule.reward_type === 'points') {
+      const pv = rule.extra_conditions_json?.point_value
+      if (typeof pv === 'number' && pv > 0) {
+        effectiveValueTwd = Math.round(Math.round(theoretical) * pv)
+      }
+    }
+
     return {
       rule_id: rule.rule_id,
       card_id: rule.card_id,
@@ -227,6 +236,7 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
       foreignFeeDeducted: feeDeducted,
       contextMatchScore,
       recommendationScore,
+      effectiveValueTwd,
       effectiveRewardRate: Math.round(effectiveRewardRate * 10000) / 10000,
       capNeedsUserConfirmation,
       requiresRegistration: rule.requires_registration === 'yes',

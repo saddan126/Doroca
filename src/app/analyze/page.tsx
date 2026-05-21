@@ -167,8 +167,10 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
             表定回饋 {r.theoreticalRewardTwd.toLocaleString()} 元，已扣除國外手續費 {r.foreignFeeDeducted.toLocaleString()} 元
           </p>
         )}
-        {getRewardCurrencyInfo(r).isNonCash && (
-          <p className="text-xs text-amber-600 mt-1">⚠ 非現金，請確認兌換條件</p>
+        {r.reward_type === 'points' && (
+          r.effectiveValueTwd !== null
+            ? <p className="text-xs text-blue-500 mt-1">等值參考：約 NT$ {r.effectiveValueTwd.toLocaleString()} 元</p>
+            : <p className="text-xs text-amber-600 mt-1">⚠ 點數等值需自行確認</p>
         )}
       </div>
 
