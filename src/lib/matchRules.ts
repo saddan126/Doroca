@@ -47,6 +47,8 @@ export type ScoredRule = {
   theoreticalRewardTwd: number
   netRewardTwd: number
   foreignFeeDeducted: number
+  contextMatchScore: number
+  recommendationScore: number
   effectiveRewardRate: number
   capNeedsUserConfirmation: boolean
   requiresRegistration: boolean
@@ -171,6 +173,20 @@ function calcComplexity(rule: MatchedRule): 'low' | 'medium' | 'high' {
 
 const FOREIGN_CATEGORIES = ['foreign_currency', 'travel', 'flight', 'hotel']
 
+const COMPLEXITY_PENALTY: Record<string, number> = {
+  low: 0,
+  medium: 20,
+  high: 50,
+}
+
+function calcContextMatchScore(merchants: string | null, category: string): number {
+  if (!merchants || merchants === 'all') return 1.0
+  if (merchants === 'designated_merchants') return 0.8
+  // 有指定商家清單 + 分類為實體通路 → 可能不在名單內，輕微扣分
+  if (['convenience_store', 'supermarket', 'department_store'].includes(category)) return 0.9
+  return 1.0
+}
+
 export function scoreRules(rules: MatchedRule[], amount: number, category = ''): ScoredRule[] {
   const isForeign = FOREIGN_CATEGORIES.includes(category)
 
@@ -195,6 +211,9 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
     const feeDeducted = isForeign ? Math.round(amount * rule.foreign_transaction_fee_rate) : 0
     const net = Math.max(0, Math.round(theoretical) - feeDeducted)
     const effectiveRewardRate = amount > 0 ? theoretical / amount : 0
+    const complexity = calcComplexity(rule)
+    const contextMatchScore = calcContextMatchScore(rule.applicable_merchants, category)
+    const recommendationScore = Math.max(0, net * contextMatchScore - COMPLEXITY_PENALTY[complexity])
 
     return {
       rule_id: rule.rule_id,
@@ -206,11 +225,13 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
       theoreticalRewardTwd: Math.round(theoretical),
       netRewardTwd: net,
       foreignFeeDeducted: feeDeducted,
+      contextMatchScore,
+      recommendationScore,
       effectiveRewardRate: Math.round(effectiveRewardRate * 10000) / 10000,
       capNeedsUserConfirmation,
       requiresRegistration: rule.requires_registration === 'yes',
       requiresNewCustomer: rule.requires_new_customer === 'yes',
-      conditionComplexity: calcComplexity(rule),
+      conditionComplexity: complexity,
       reward_cap_amount: rule.reward_cap_amount,
       reward_cap_cycle: rule.reward_cap_cycle,
       excludes_third_party_payment: rule.excludes_third_party_payment,
@@ -309,29 +330,29 @@ export function generateRecommendations(
 ): Recommendation[] {
   const recs: Recommendation[] = []
 
-  // 1. 最佳實用方案：淨回饋最高，且複雜度不是 high
+  // 1. 最佳實用方案：綜合分數最高，且複雜度不是 high
   const practical =
     [...scored]
       .filter((r) => r.conditionComplexity !== 'high')
-      .sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
+      .sort((a, b) => b.recommendationScore - a.recommendationScore)[0] ?? null
   recs.push({ type: 'best_practical', label: '最佳實用方案', rule: practical })
 
-  // 2. 理論最高方案：淨回饋絕對最高，不管複雜度
+  // 2. 理論最高方案：純淨回饋最高，不管複雜度與匹配度
   const highest =
     [...scored].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
   recs.push({ type: 'highest_theoretical', label: '理論最高方案', rule: highest })
 
-  // 3. 最穩定方案：無需登錄、無回饋上限、且條件簡單（low），淨回饋最高
+  // 3. 最穩定方案：無需登錄、無回饋上限、且條件簡單（low），綜合分數最高
   const stable =
     [...scored]
       .filter((r) => !r.requiresRegistration && r.reward_cap_amount === null && r.conditionComplexity === 'low')
-      .sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
+      .sort((a, b) => b.recommendationScore - a.recommendationScore)[0] ?? null
   recs.push({ type: 'most_stable', label: '最穩定方案', rule: stable })
 
   // 4. 新卡方案：僅在願意辦新卡時顯示
   if (willingToApplyNewCard) {
     const newCard =
-      [...newCardRules].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
+      [...newCardRules].sort((a, b) => b.recommendationScore - a.recommendationScore)[0] ?? null
     recs.push({ type: 'new_card', label: '新卡方案', rule: newCard })
   }
 
