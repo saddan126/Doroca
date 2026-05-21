@@ -371,6 +371,24 @@ export type MergedRec = {
   rule: ScoredRule | null
 }
 
+function filterExclusiveGroups(scored: ScoredRule[]): ScoredRule[] {
+  const groupBest = new Map<string, ScoredRule>()
+  const ungrouped: ScoredRule[] = []
+
+  for (const rule of scored) {
+    if (!rule.exclusive_group_key) {
+      ungrouped.push(rule)
+    } else {
+      const current = groupBest.get(rule.exclusive_group_key)
+      if (!current || rule.recommendationScore > current.recommendationScore) {
+        groupBest.set(rule.exclusive_group_key, rule)
+      }
+    }
+  }
+
+  return [...ungrouped, ...Array.from(groupBest.values())]
+}
+
 export function generateRecommendations(
   scored: ScoredRule[],
   willingToApplyNewCard: boolean,
@@ -378,21 +396,24 @@ export function generateRecommendations(
 ): Recommendation[] {
   const recs: Recommendation[] = []
 
+  // 同一互斥群組只保留分數最高者（例如 Richart 各方案只取最優）
+  const effective = filterExclusiveGroups(scored)
+
   // 1. 最佳實用方案：綜合分數最高，且複雜度不是 high
   const practical =
-    [...scored]
+    [...effective]
       .filter((r) => r.conditionComplexity !== 'high')
       .sort((a, b) => b.recommendationScore - a.recommendationScore)[0] ?? null
   recs.push({ type: 'best_practical', label: '最佳實用方案', rule: practical })
 
   // 2. 理論最高方案：純淨回饋最高，不管複雜度與匹配度
   const highest =
-    [...scored].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
+    [...effective].sort((a, b) => b.netRewardTwd - a.netRewardTwd)[0] ?? null
   recs.push({ type: 'highest_theoretical', label: '理論最高方案', rule: highest })
 
   // 3. 最穩定方案：無需登錄、無回饋上限、且條件簡單（low），綜合分數最高
   const stable =
-    [...scored]
+    [...effective]
       .filter((r) => !r.requiresRegistration && r.reward_cap_amount === null && r.conditionComplexity === 'low')
       .sort((a, b) => b.recommendationScore - a.recommendationScore)[0] ?? null
   recs.push({ type: 'most_stable', label: '最穩定方案', rule: stable })
