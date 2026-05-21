@@ -287,7 +287,7 @@ export default function AnalyzePage() {
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="例：訂花蓮民宿、買 iPhone 充電線"
               required
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
@@ -305,7 +305,7 @@ export default function AnalyzePage() {
                 placeholder="0"
                 required
                 min="1"
-                className="w-full border border-gray-200 rounded-xl pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 rounded-xl pl-10 pr-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -319,7 +319,7 @@ export default function AnalyzePage() {
               value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}
               required
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">請選擇分類</option>
               {CATEGORIES.map((c) => (

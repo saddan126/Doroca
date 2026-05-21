@@ -370,7 +370,7 @@ export default function CardsPage() {
                       onChange={(e) =>
                         updateBankStatusLocal(b.bank_id, 'relationship_status', e.target.value)
                       }
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="currently_holding">目前持有</option>
                       <option value="never_had">從未持有</option>
@@ -385,7 +385,7 @@ export default function CardsPage() {
                           updateBankStatusLocal(b.bank_id, 'note', e.target.value)
                         }
                         placeholder="備註（選填）"
-                        className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                       <button
                         onClick={() => saveBankStatus(b.bank_id)}
@@ -421,7 +421,7 @@ export default function CardsPage() {
                   value={selectedBank}
                   onChange={(e) => handleBankChange(e.target.value)}
                   required
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">請選擇銀行</option>
                   {banks.map((b) => (
@@ -438,7 +438,7 @@ export default function CardsPage() {
                   onChange={(e) => setSelectedCard(e.target.value)}
                   required
                   disabled={!selectedBank}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
                 >
                   <option value="">{selectedBank ? '請選擇卡片' : '請先選擇銀行'}</option>
                   {filteredCards.map((c) => (
@@ -452,7 +452,7 @@ export default function CardsPage() {
                   type="month"
                   value={approvedDate}
                   onChange={(e) => setApprovedDate(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -462,7 +462,7 @@ export default function CardsPage() {
                   value={addNote}
                   onChange={(e) => setAddNote(e.target.value)}
                   placeholder="例：主要消費卡"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <button
@@ -493,7 +493,7 @@ export default function CardsPage() {
                   type="month"
                   value={editApprovedDate}
                   onChange={(e) => setEditApprovedDate(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
@@ -503,7 +503,7 @@ export default function CardsPage() {
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
                   placeholder="例：主要消費卡"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <button
