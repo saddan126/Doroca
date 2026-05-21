@@ -27,6 +27,11 @@ export type MatchedRule = {
   min_spending: number
   foreign_transaction_fee_rate: number
   official_card_url: string | null
+  requires_user_action: boolean
+  action_label: string | null
+  exclusive_group_key: string | null
+  calculation_basis: string
+  confidence: string
   applicable_merchants: string | null
   source_url: string | null
   valid_from: string | null
@@ -53,6 +58,12 @@ export type ScoredRule = {
   recommendationScore: number
   effectiveValueTwd: number | null
   official_card_url: string | null
+  requires_user_action: boolean
+  action_label: string | null
+  exclusive_group_key: string | null
+  calculation_basis: string
+  confidence: string
+  cardStatus: 'A' | 'B' | 'C'
   effectiveRewardRate: number
   capNeedsUserConfirmation: boolean
   requiresRegistration: boolean
@@ -105,6 +116,7 @@ export async function matchRules(
       excludes_third_party_payment,
       new_customer_definition_text, new_customer_check_mode,
       extra_conditions_json, min_spending,
+      requires_user_action, action_label, exclusive_group_key, calculation_basis, confidence,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
       cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
@@ -133,6 +145,11 @@ export async function matchRules(
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
       official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
+      requires_user_action: rule.requires_user_action ?? false,
+      action_label: rule.action_label ?? null,
+      exclusive_group_key: rule.exclusive_group_key ?? null,
+      calculation_basis: rule.calculation_basis ?? 'calendar_month',
+      confidence: rule.confidence ?? 'medium',
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
@@ -178,6 +195,15 @@ function calcComplexity(rule: MatchedRule): 'low' | 'medium' | 'high' {
 
 const FOREIGN_CATEGORIES = ['foreign_currency', 'travel', 'flight', 'hotel']
 
+function calcCardStatus(rule: MatchedRule): 'A' | 'B' | 'C' {
+  if (rule.requires_user_action) return 'B'
+  if (
+    rule.reward_cap_amount !== null ||
+    (rule.requires_registration === 'yes' && rule.confidence === 'low')
+  ) return 'C'
+  return 'A'
+}
+
 const COMPLEXITY_PENALTY: Record<string, number> = {
   low: 0,
   medium: 20,
@@ -219,6 +245,7 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
     const complexity = calcComplexity(rule)
     const contextMatchScore = calcContextMatchScore(rule.applicable_merchants, category)
     const recommendationScore = Math.max(0, net * contextMatchScore - COMPLEXITY_PENALTY[complexity])
+    const cardStatus = calcCardStatus(rule)
 
     let effectiveValueTwd: number | null = null
     if (rule.reward_type === 'points') {
@@ -242,6 +269,12 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
       recommendationScore,
       effectiveValueTwd,
       official_card_url: rule.official_card_url,
+      requires_user_action: rule.requires_user_action,
+      action_label: rule.action_label,
+      exclusive_group_key: rule.exclusive_group_key,
+      calculation_basis: rule.calculation_basis,
+      confidence: rule.confidence,
+      cardStatus,
       effectiveRewardRate: Math.round(effectiveRewardRate * 10000) / 10000,
       capNeedsUserConfirmation,
       requiresRegistration: rule.requires_registration === 'yes',
@@ -411,6 +444,7 @@ export async function matchNewCardRules(
       excludes_third_party_payment,
       new_customer_definition_text, new_customer_check_mode,
       extra_conditions_json, min_spending,
+      requires_user_action, action_label, exclusive_group_key, calculation_basis, confidence,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
       cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
@@ -436,6 +470,11 @@ export async function matchNewCardRules(
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
       official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
+      requires_user_action: rule.requires_user_action ?? false,
+      action_label: rule.action_label ?? null,
+      exclusive_group_key: rule.exclusive_group_key ?? null,
+      calculation_basis: rule.calculation_basis ?? 'calendar_month',
+      confidence: rule.confidence ?? 'medium',
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,

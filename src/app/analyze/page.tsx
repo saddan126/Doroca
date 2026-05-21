@@ -76,14 +76,23 @@ function mergeRecommendations(recs: Recommendation[]): MergedRec[] {
   return merged
 }
 
-const COMPLEXITY_STYLES: Record<string, string> = {
-  low:    'bg-green-50 text-green-600',
-  medium: 'bg-amber-50 text-amber-600',
-  high:   'bg-red-50 text-red-600',
+const STATUS_BADGE: Record<string, string> = {
+  A: 'bg-green-100 text-green-700',
+  B: 'bg-blue-100 text-blue-700',
+  C: 'bg-amber-100 text-amber-700',
 }
 
-const COMPLEXITY_LABELS: Record<string, string> = {
-  low: '條件簡單', medium: '條件中等', high: '條件複雜',
+const STATUS_LABEL: Record<string, string> = {
+  A: '可直接使用',
+  B: '需先執行動作',
+  C: '需補充資訊',
+}
+
+const REC_REASON: Record<string, string> = {
+  best_practical:      '回饋與條件的最佳平衡',
+  highest_theoretical: '回饋金額最高',
+  most_stable:         '條件最單純，直刷即可',
+  new_card:            '申辦後可獲得此優惠',
 }
 
 type FormData = {
@@ -126,6 +135,7 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
 
   const r = merged.rule
   const isNewCard = merged.types.includes('new_card')
+  const primaryType = merged.types[0]
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -134,8 +144,8 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
             {merged.labels[i]}
           </span>
         ))}
-        <span className={`text-xs px-2.5 py-1 rounded-full ${COMPLEXITY_STYLES[r.conditionComplexity]}`}>
-          {COMPLEXITY_LABELS[r.conditionComplexity]}
+        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_BADGE[r.cardStatus]}`}>
+          {STATUS_LABEL[r.cardStatus]}
         </span>
       </div>
 
@@ -188,6 +198,17 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
           </ul>
         </div>
       )}
+
+      {r.cardStatus === 'B' && r.action_label && (
+        <div className="mt-3 bg-blue-50 rounded-xl px-3 py-2.5">
+          <p className="text-xs font-medium text-blue-700 mb-1">刷卡前要做</p>
+          <p className="text-xs text-blue-800">{r.action_label}</p>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-3">
+        {REC_REASON[primaryType] ?? ''}
+      </p>
 
       {isNewCard && (
         <div className="mt-3 bg-purple-50 rounded-xl px-3 py-2.5">
