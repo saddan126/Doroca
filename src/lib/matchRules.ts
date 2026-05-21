@@ -119,8 +119,8 @@ export async function matchRules(
     .map((rule) => ({
       rule_id: rule.rule_id,
       card_id: rule.card_id,
-      card_name: (rule.cards as RawCard)?.card_name ?? '',
-      bank_name: (rule.cards as RawCard)?.banks?.bank_name ?? '',
+      card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
+      bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
@@ -217,10 +217,18 @@ export function scoreRules(rules: MatchedRule[], amount: number): ScoredRule[] {
 
 // ── Step 4：標記需確認條件 ────────────────────────────────────
 
+function isMatchedRule(rule: MatchedRule | ScoredRule): rule is MatchedRule {
+  return 'requires_registration' in rule
+}
+
 export function buildConfirmItems(rule: MatchedRule | ScoredRule): ConfirmItem[] {
   const items: ConfirmItem[] = []
 
-  if (rule.requires_registration === 'yes' || (rule as MatchedRule).requires_registration === 'yes') {
+  const registrationRequired = isMatchedRule(rule)
+    ? rule.requires_registration === 'yes'
+    : (rule as ScoredRule).requiresRegistration
+
+  if (registrationRequired) {
     items.push({
       type: 'registration',
       message: '消費前需完成活動登錄',
@@ -234,7 +242,11 @@ export function buildConfirmItems(rule: MatchedRule | ScoredRule): ConfirmItem[]
     })
   }
 
-  if (rule.requires_new_customer === 'yes' || (rule as MatchedRule).requires_new_customer === 'yes') {
+  const newCustomerRequired = isMatchedRule(rule)
+    ? rule.requires_new_customer === 'yes'
+    : (rule as ScoredRule).requiresNewCustomer
+
+  if (newCustomerRequired) {
     const definition = rule.new_customer_definition_text
     items.push({
       type: 'new_customer',
@@ -372,8 +384,8 @@ export async function matchNewCardRules(
     .map((rule) => ({
       rule_id: rule.rule_id,
       card_id: rule.card_id,
-      card_name: (rule.cards as RawCard)?.card_name ?? '',
-      bank_name: (rule.cards as RawCard)?.banks?.bank_name ?? '',
+      card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
+      bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,

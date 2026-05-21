@@ -72,7 +72,7 @@ export default function CardsPage() {
       .eq('user_id', 'me')
 
     if (error) console.error(error)
-    else setHoldings(data || [])
+    else setHoldings((data || []) as unknown as CardHolding[])
     setLoading(false)
   }
 
