@@ -125,6 +125,7 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
   }
 
   const r = merged.rule
+  const isNewCard = merged.types.includes('new_card')
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -185,6 +186,22 @@ function MergedRecCard({ merged }: { merged: MergedRec }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {isNewCard && (
+        <div className="mt-3 bg-purple-50 rounded-xl px-3 py-2.5">
+          <p className="text-xs font-medium text-purple-700 mb-1">你目前沒有這張卡，需先申辦才能使用此優惠</p>
+          {r.official_card_url && (
+            <a
+              href={r.official_card_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-purple-600 underline"
+            >
+              前往官方申辦頁面
+            </a>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 type RawCard = {
   card_name: string
   foreign_transaction_fee_rate: number | null
+  official_card_url: string | null
   banks: { bank_name: string } | null
 } | null
 
@@ -25,6 +26,7 @@ export type MatchedRule = {
   extra_conditions_json: Record<string, unknown> | null
   min_spending: number
   foreign_transaction_fee_rate: number
+  official_card_url: string | null
   applicable_merchants: string | null
   source_url: string | null
   valid_from: string | null
@@ -50,6 +52,7 @@ export type ScoredRule = {
   contextMatchScore: number
   recommendationScore: number
   effectiveValueTwd: number | null
+  official_card_url: string | null
   effectiveRewardRate: number
   capNeedsUserConfirmation: boolean
   requiresRegistration: boolean
@@ -104,7 +107,7 @@ export async function matchRules(
       extra_conditions_json, min_spending,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
-      cards ( card_name, foreign_transaction_fee_rate, banks ( bank_name ) )
+      cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
     `)
     .in('card_id', heldCardIds)
 
@@ -129,6 +132,7 @@ export async function matchRules(
       card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
+      official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
@@ -237,6 +241,7 @@ export function scoreRules(rules: MatchedRule[], amount: number, category = ''):
       contextMatchScore,
       recommendationScore,
       effectiveValueTwd,
+      official_card_url: rule.official_card_url,
       effectiveRewardRate: Math.round(effectiveRewardRate * 10000) / 10000,
       capNeedsUserConfirmation,
       requiresRegistration: rule.requires_registration === 'yes',
@@ -408,7 +413,7 @@ export async function matchNewCardRules(
       extra_conditions_json, min_spending,
       applicable_merchants, source_url,
       valid_from, valid_to, source_updated_at,
-      cards ( card_name, foreign_transaction_fee_rate, banks ( bank_name ) )
+      cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
     `)
     .in('card_id', newCardIds)
 
@@ -430,6 +435,7 @@ export async function matchNewCardRules(
       card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
       bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
       foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
+      official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
       rule_name: rule.rule_name,
       reward_type: rule.reward_type,
       reward_rate: rule.reward_rate ?? 0,
