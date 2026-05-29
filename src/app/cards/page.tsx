@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/AuthProvider'
 
 type CardHolding = {
   id: string
+  card_id: string
   holding_status: string
   approved_date: string | null
   note: string | null
@@ -26,6 +28,9 @@ type BankStatus = {
 }
 
 export default function CardsPage() {
+  const { user } = useAuth()
+  const userId = user?.id ?? 'me'
+
   // ── Card list ──
   const [holdings, setHoldings] = useState<CardHolding[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,6 +66,7 @@ export default function CardsPage() {
       .from('user_card_holdings')
       .select(`
         id,
+        card_id,
         holding_status,
         approved_date,
         note,
@@ -69,7 +75,7 @@ export default function CardsPage() {
           banks ( bank_name )
         )
       `)
-      .eq('user_id', 'me')
+      .eq('user_id', userId)
 
     if (error) console.error(error)
     else setHoldings((data || []) as unknown as CardHolding[])
@@ -81,7 +87,7 @@ export default function CardsPage() {
       supabase.from('banks').select('bank_id, bank_name').order('bank_name'),
       supabase.from('user_bank_status')
         .select('id, bank_id, relationship_status, note')
-        .eq('user_id', 'me'),
+        .eq('user_id', userId),
     ])
 
     setBanks(banksData || [])
@@ -138,7 +144,7 @@ export default function CardsPage() {
     setAddSubmitting(true)
 
     const { error } = await supabase.from('user_card_holdings').insert({
-      user_id: 'me',
+      user_id: userId,
       card_id: selectedCard,
       holding_status: 'holding',
       approved_date: approvedDate || null,
@@ -202,6 +208,36 @@ export default function CardsPage() {
     else await fetchHoldings()
   }
 
+  async function handleDeleteCard(h: CardHolding) {
+    const cardId = h.card_id
+    const cardName = h.cards?.card_name ?? '此卡片'
+    setMenuOpenId(null)
+
+    const [{ count: ruleCount }, { data: holdingsData }] = await Promise.all([
+      supabase.from('offer_rules').select('rule_id', { count: 'exact', head: true }).eq('card_id', cardId),
+      supabase.from('user_card_holdings').select('id').eq('card_id', cardId),
+    ])
+
+    const n = ruleCount ?? 0
+    let msg = `確定刪除「${cardName}」嗎？\n`
+    if (n > 0) msg += `這張卡有 ${n} 條優惠規則，刪除後這些規則也會一起刪除。\n`
+    msg += '此操作無法復原。'
+    if (!window.confirm(msg)) return
+
+    if (n > 0) {
+      const { error } = await supabase.from('offer_rules').delete().eq('card_id', cardId)
+      if (error) { alert(`刪除規則失敗：${error.message}`); return }
+    }
+    const holdingsCount = holdingsData?.length ?? 0
+    if (holdingsCount > 0) {
+      const { error } = await supabase.from('user_card_holdings').delete().eq('card_id', cardId)
+      if (error) { alert(`刪除持卡記錄失敗：${error.message}`); return }
+    }
+    const { error } = await supabase.from('cards').delete().eq('card_id', cardId)
+    if (error) { alert(`刪除卡片失敗：${error.message}`); return }
+    await fetchHoldings()
+  }
+
   // ── Bank status ──────────────────────────────────────────────
 
   function updateBankStatusLocal(
@@ -232,7 +268,7 @@ export default function CardsPage() {
       const { data, error: insertError } = await supabase
         .from('user_bank_status')
         .insert({
-          user_id: 'me',
+          user_id: userId,
           bank_id: bankId,
           relationship_status: status.relationship_status,
           note: status.note || null,
@@ -343,6 +379,12 @@ export default function CardsPage() {
                                 標示已剪卡
                               </button>
                             )}
+                            <button
+                              onClick={() => handleDeleteCard(h)}
+                              className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-gray-50 border-t border-gray-100"
+                            >
+                              刪除卡片
+                            </button>
                           </div>
                         </>
                       )}
@@ -363,18 +405,18 @@ export default function CardsPage() {
             <ul className="space-y-3">
               {bankStatuses.map((b) => (
                 <li key={b.bank_id} className="bg-white rounded-2xl border border-gray-100 p-4">
-                  <p className="text-sm font-semibold text-gray-800 mb-3">{b.bank_name}</p>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">{b.bank_name}</p>
+                  <p className="text-xs text-gray-500 mb-2.5">你是否曾經持有過 {b.bank_name} 的信用卡？</p>
                   <div className="space-y-2">
                     <select
-                      value={b.relationship_status}
+                      value={b.relationship_status === 'cancelled_before' ? 'currently_holding' : b.relationship_status}
                       onChange={(e) =>
                         updateBankStatusLocal(b.bank_id, 'relationship_status', e.target.value)
                       }
                       className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="currently_holding">目前持有</option>
-                      <option value="never_had">從未持有</option>
-                      <option value="cancelled_before">曾持有已剪卡</option>
+                      <option value="never_had">從未持有（可能符合新戶優惠）</option>
+                      <option value="currently_holding">曾持有或目前持有（通常不符合新戶優惠）</option>
                       <option value="unknown">不確定</option>
                     </select>
                     <div className="flex gap-2">

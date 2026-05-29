@@ -1,5 +1,10 @@
 import { supabase } from './supabase'
 
+async function getCurrentUserId(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser()
+  return user?.id ?? 'me'
+}
+
 type RawCard = {
   card_name: string
   foreign_transaction_fee_rate: number | null
@@ -84,19 +89,58 @@ export type ScoredRule = {
   confirmItems: ConfirmItem[]
 }
 
+// ── 內部 helper：把 Supabase raw row 轉成 MatchedRule ────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapToMatchedRule(rule: any): MatchedRule {
+  return {
+    rule_id: rule.rule_id,
+    card_id: rule.card_id,
+    card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
+    bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
+    foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
+    official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
+    requires_user_action: rule.requires_user_action ?? false,
+    action_label: rule.action_label ?? null,
+    exclusive_group_key: rule.exclusive_group_key ?? null,
+    calculation_basis: rule.calculation_basis ?? 'calendar_month',
+    confidence: rule.confidence ?? 'medium',
+    rule_name: rule.rule_name,
+    reward_type: rule.reward_type,
+    reward_rate: rule.reward_rate ?? 0,
+    reward_fixed_amount: rule.reward_fixed_amount ?? 0,
+    reward_cap_amount: rule.reward_cap_amount ?? null,
+    reward_cap_cycle: rule.reward_cap_cycle ?? 'none',
+    requires_registration: rule.requires_registration ?? 'no',
+    requires_new_customer: rule.requires_new_customer ?? 'no',
+    excludes_third_party_payment: rule.excludes_third_party_payment ?? 'unknown',
+    new_customer_definition_text: rule.new_customer_definition_text ?? null,
+    new_customer_check_mode: rule.new_customer_check_mode ?? 'unknown',
+    extra_conditions_json: rule.extra_conditions_json ?? null,
+    min_spending: rule.min_spending ?? 0,
+    applicable_merchants: rule.applicable_merchants ?? null,
+    source_url: rule.source_url ?? null,
+    valid_from: rule.valid_from ?? null,
+    valid_to: rule.valid_to ?? null,
+    source_updated_at: rule.source_updated_at ?? null,
+  }
+}
+
 // ── Step 2：篩選符合規則 ─────────────────────────────────────
 
 export async function matchRules(
   category: string,
   amount: number,
-  date: Date = new Date()
+  date: Date = new Date(),
+  piAccumulated = 0
 ): Promise<MatchedRule[]> {
   const today = date.toISOString().split('T')[0]
+  const userId = await getCurrentUserId()
 
   const { data: holdings, error: holdingsError } = await supabase
     .from('user_card_holdings')
     .select('card_id')
-    .eq('user_id', 'me')
+    .eq('user_id', userId)
     .eq('holding_status', 'holding')
 
   if (holdingsError || !holdings || holdings.length === 0) {
@@ -122,6 +166,7 @@ export async function matchRules(
       cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
     `)
     .in('card_id', heldCardIds)
+    .neq('review_status', 'deactivated')
 
   if (rulesError || !rules) {
     console.error('無法讀取優惠規則', rulesError)
@@ -131,44 +176,17 @@ export async function matchRules(
   return rules
     .filter((rule) => {
       if (rule.valid_to && rule.valid_to < today) return false
-      if (rule.min_spending && amount < rule.min_spending) return false
+      if (rule.min_spending) {
+        const checkAmount = rule.card_id === 'esun-pi' ? piAccumulated + amount : amount
+        if (checkAmount < rule.min_spending) return false
+      }
       const cats = rule.category
         ? rule.category.split(',').map((c: string) => c.trim())
         : []
-      if (!cats.includes(category)) return false
+      if (category !== 'uncertain' && !cats.includes(category)) return false
       return true
     })
-    .map((rule) => ({
-      rule_id: rule.rule_id,
-      card_id: rule.card_id,
-      card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
-      bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
-      foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
-      official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
-      requires_user_action: rule.requires_user_action ?? false,
-      action_label: rule.action_label ?? null,
-      exclusive_group_key: rule.exclusive_group_key ?? null,
-      calculation_basis: rule.calculation_basis ?? 'calendar_month',
-      confidence: rule.confidence ?? 'medium',
-      rule_name: rule.rule_name,
-      reward_type: rule.reward_type,
-      reward_rate: rule.reward_rate ?? 0,
-      reward_fixed_amount: rule.reward_fixed_amount ?? 0,
-      reward_cap_amount: rule.reward_cap_amount ?? null,
-      reward_cap_cycle: rule.reward_cap_cycle ?? 'none',
-      requires_registration: rule.requires_registration ?? 'no',
-      requires_new_customer: rule.requires_new_customer ?? 'no',
-      excludes_third_party_payment: rule.excludes_third_party_payment ?? 'unknown',
-      new_customer_definition_text: rule.new_customer_definition_text ?? null,
-      new_customer_check_mode: rule.new_customer_check_mode ?? 'unknown',
-      extra_conditions_json: rule.extra_conditions_json ?? null,
-      min_spending: rule.min_spending ?? 0,
-      applicable_merchants: rule.applicable_merchants ?? null,
-      source_url: rule.source_url ?? null,
-      valid_from: rule.valid_from ?? null,
-      valid_to: rule.valid_to ?? null,
-      source_updated_at: rule.source_updated_at ?? null,
-    }))
+    .map(mapToMatchedRule)
 }
 
 // ── Step 3：計算理論回饋 ─────────────────────────────────────
@@ -428,6 +446,49 @@ export function generateRecommendations(
   return recs
 }
 
+// 取得 is_market_card=true 的市場參考規則
+export async function matchMarketCardRules(
+  category: string,
+  amount: number,
+  date: Date = new Date()
+): Promise<ScoredRule[]> {
+  const today = date.toISOString().split('T')[0]
+
+  const { data: rules } = await supabase
+    .from('offer_rules')
+    .select(`
+      rule_id, card_id, rule_name, category,
+      reward_type, reward_rate, reward_fixed_amount,
+      reward_cap_amount, reward_cap_cycle,
+      requires_registration, requires_new_customer,
+      excludes_third_party_payment,
+      new_customer_definition_text, new_customer_check_mode,
+      extra_conditions_json, min_spending,
+      requires_user_action, action_label, exclusive_group_key, calculation_basis, confidence,
+      applicable_merchants, source_url,
+      valid_from, valid_to, source_updated_at,
+      cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
+    `)
+    .eq('is_market_card', true)
+    .neq('review_status', 'deactivated')
+
+  if (!rules) return []
+
+  const matched: MatchedRule[] = rules
+    .filter((rule) => {
+      if (rule.valid_to && rule.valid_to < today) return false
+      if (rule.min_spending && amount < rule.min_spending) return false
+      const cats = rule.category
+        ? rule.category.split(',').map((c: string) => c.trim())
+        : []
+      if (category !== 'uncertain' && !cats.includes(category)) return false
+      return true
+    })
+    .map(mapToMatchedRule)
+
+  return scoreRules(matched, amount, category)
+}
+
 // 取得非持有卡的符合規則（新卡方案用）
 export async function matchNewCardRules(
   category: string,
@@ -436,10 +497,11 @@ export async function matchNewCardRules(
 ): Promise<ScoredRule[]> {
   const today = date.toISOString().split('T')[0]
 
+  const userId = await getCurrentUserId()
   const { data: holdings } = await supabase
     .from('user_card_holdings')
     .select('card_id')
-    .eq('user_id', 'me')
+    .eq('user_id', userId)
     .eq('holding_status', 'holding')
 
   const heldCardIds = (holdings || []).map((h) => h.card_id)
@@ -471,6 +533,7 @@ export async function matchNewCardRules(
       cards ( card_name, foreign_transaction_fee_rate, official_card_url, banks ( bank_name ) )
     `)
     .in('card_id', newCardIds)
+    .neq('review_status', 'deactivated')
 
   if (!rules) return []
 
@@ -481,43 +544,10 @@ export async function matchNewCardRules(
       const cats = rule.category
         ? rule.category.split(',').map((c: string) => c.trim())
         : []
-      if (!cats.includes(category)) return false
+      if (category !== 'uncertain' && !cats.includes(category)) return false
       return true
     })
-    .map((rule) => ({
-      rule_id: rule.rule_id,
-      card_id: rule.card_id,
-      card_name: (rule.cards as unknown as RawCard)?.card_name ?? '',
-      bank_name: (rule.cards as unknown as RawCard)?.banks?.bank_name ?? '',
-      foreign_transaction_fee_rate: (rule.cards as unknown as RawCard)?.foreign_transaction_fee_rate ?? 0,
-      official_card_url: (rule.cards as unknown as RawCard)?.official_card_url ?? null,
-      requires_user_action: rule.requires_user_action ?? false,
-      action_label: rule.action_label ?? null,
-      exclusive_group_key: rule.exclusive_group_key ?? null,
-      calculation_basis: rule.calculation_basis ?? 'calendar_month',
-      confidence: rule.confidence ?? 'medium',
-      rule_name: rule.rule_name,
-      reward_type: rule.reward_type,
-      reward_rate: rule.reward_rate ?? 0,
-      reward_fixed_amount: rule.reward_fixed_amount ?? 0,
-      reward_cap_amount: rule.reward_cap_amount ?? null,
-      reward_cap_cycle: rule.reward_cap_cycle ?? 'none',
-      requires_registration: rule.requires_registration ?? 'no',
-      requires_new_customer: rule.requires_new_customer ?? 'no',
-      excludes_third_party_payment: rule.excludes_third_party_payment ?? 'unknown',
-      new_customer_definition_text: rule.new_customer_definition_text ?? null,
-      new_customer_check_mode: rule.new_customer_check_mode ?? 'unknown',
-      extra_conditions_json: rule.extra_conditions_json ?? null,
-      min_spending: rule.min_spending ?? 0,
-      applicable_merchants: rule.applicable_merchants ?? null,
-      source_url: rule.source_url ?? null,
-      valid_from: rule.valid_from ?? null,
-      valid_to: rule.valid_to ?? null,
-      source_updated_at: rule.source_updated_at ?? null,
-    }))
+    .map(mapToMatchedRule)
 
-  return scoreRules(matched, amount, category).map((r) => ({
-    ...r,
-    confirmItems: buildConfirmItems(r),
-  }))
+  return scoreRules(matched, amount, category)
 }

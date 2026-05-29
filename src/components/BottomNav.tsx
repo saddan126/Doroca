@@ -7,10 +7,13 @@ const NAV_ITEMS = [
   { href: '/', label: '首頁' },
   { href: '/cards', label: '我的卡片' },
   { href: '/analyze', label: '分析消費' },
+  { href: '/rules', label: '規則健康' },
 ]
 
 export default function BottomNav() {
   const pathname = usePathname()
+
+  if (pathname === '/login') return null
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-inset-bottom">
