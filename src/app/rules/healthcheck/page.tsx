@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import AiEditBlock, { RuleSnapshot } from '@/components/AiEditBlock'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -156,7 +157,30 @@ ${ruleInfo(ruleB, 'B')}
 
 請直接給結論：
 結論：保留規則A / 保留規則B / 兩者可同時存在
-原因：（一句話）`
+原因：（一句話）
+
+---
+如果你建議修改其中一條規則，請在回答最後附上以下 JSON。
+只輸出需要修改的欄位，不需要輸出整條規則。
+JSON 必須是可被 JSON.parse() 解析的純 JSON，不要加 Markdown。
+
+可用的 rule_id：規則A = "${ruleA.rule_id}"，規則B = "${ruleB.rule_id}"
+
+{
+  "rule_id": "要修改的 rule_id",
+  "changes": {
+    "rule_name": "新名稱（不需修改請省略）",
+    "reward_type": "cashback 或 points 或 fixed_amount（不需修改請省略）",
+    "reward_rate": 0.01,
+    "reward_fixed_amount": null,
+    "min_spending": 0,
+    "reward_cap_amount": null,
+    "notes": "補充說明（不需修改請省略）"
+  },
+  "reason": "為什麼這樣修改（一句話）"
+}
+
+若兩條規則都不需要修改，請省略 JSON，只給文字結論。`
 }
 
 function buildHealthPrompt(cardName: string, bankName: string, rules: CardRule[]): string {
@@ -229,6 +253,8 @@ export default function HealthCheckPage() {
   const [typeBSelections, setTypeBSelections] = useState<Record<string, string>>({})
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null)
   const [promptFallback, setPromptFallback] = useState<{ id: string; text: string } | null>(null)
+  const [followUpOps, setFollowUpOps] = useState<Set<string>>(new Set())
+  const [followUpEditTargets, setFollowUpEditTargets] = useState<Record<string, string | null>>({})
 
   useEffect(() => {
     supabase.from('cards').select('card_id, card_name, banks(bank_name)').eq('status', 'active').order('card_name')
@@ -368,11 +394,14 @@ export default function HealthCheckPage() {
     markApplied(op.primary_rule_id)
   }
 
-  async function handleBothKeepPendingReview(op: ReviewOp) {
+  async function handleBothKeepAndEdit(op: ReviewOp) {
     const allIds = [op.primary_rule_id, ...op.affected_rule_ids].filter(Boolean)
-    const note = 'AI 健檢：版本衝突，兩筆規則皆保留，需人工確認是否為同一優惠的新舊版本'
-    for (const id of allIds) await supabase.from('offer_rules').update({ review_status: 'needs_review', review_note: note }).eq('rule_id', id)
-    markApplied(op.primary_rule_id)
+    for (const id of allIds) {
+      await supabase.from('offer_rules')
+        .update({ review_status: 'human_reviewed', review_note: '已確認可並存' })
+        .eq('rule_id', id)
+    }
+    setFollowUpOps(prev => new Set(Array.from(prev).concat(op.primary_rule_id)))
   }
 
   async function handleTypeBKeepOne(op: ReviewOp) {
@@ -413,6 +442,19 @@ export default function HealthCheckPage() {
     } catch {
       setPromptFallback({ id: opId, text: promptText })
       showToast('剪貼簿複製失敗，請手動複製下方文字')
+    }
+  }
+
+  function toRuleSnapshot(r: CardRule): RuleSnapshot {
+    return {
+      rule_id: r.rule_id,
+      rule_name: r.rule_name,
+      reward_type: r.reward_type,
+      reward_rate: r.reward_rate,
+      reward_fixed_amount: r.reward_fixed_amount,
+      min_spending: r.min_spending,
+      reward_cap_amount: r.reward_cap_amount,
+      notes: r.notes,
     }
   }
 
@@ -506,6 +548,46 @@ export default function HealthCheckPage() {
             <p className="text-xs text-gray-400 mb-3">待確認 {pendingCount} 條・已套用 {applyCount} 條</p>
             <div className="space-y-3">
               {reviewOps.map(op => {
+                if (followUpOps.has(op.primary_rule_id)) {
+                  const editTarget = followUpEditTargets[op.primary_rule_id] ?? null
+                  const editRule = editTarget ? op._allRules.find(r => r.rule_id === editTarget) : null
+                  return (
+                    <div key={op.primary_rule_id} className="rounded-2xl border border-green-200 bg-green-50 p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-green-600">✓</span>
+                        <p className="text-sm font-medium text-green-700">已確認兩筆規則可並存</p>
+                      </div>
+                      {!editTarget ? (
+                        <>
+                          <p className="text-xs text-gray-500 mb-3">如果 AI 建議需要修改其中一條，可以在這裡處理：</p>
+                          <div className="space-y-2">
+                            {op._allRules.map(r => (
+                              <button
+                                key={r.rule_id}
+                                onClick={() => setFollowUpEditTargets(prev => ({ ...prev, [op.primary_rule_id]: r.rule_id }))}
+                                className="w-full text-left bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-700 hover:border-blue-300 hover:bg-blue-50 transition-all"
+                              >
+                                修改「{r.rule_name}」
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => markApplied(op.primary_rule_id)}
+                              className="w-full bg-green-600 text-white text-xs font-medium py-2 rounded-xl hover:bg-green-700 active:scale-95 transition-all"
+                            >
+                              不需要修改，完成
+                            </button>
+                          </div>
+                        </>
+                      ) : editRule ? (
+                        <AiEditBlock
+                          currentRule={toRuleSnapshot(editRule)}
+                          onShowToast={showToast}
+                          onComplete={() => setFollowUpEditTargets(prev => ({ ...prev, [op.primary_rule_id]: null }))}
+                        />
+                      ) : null}
+                    </div>
+                  )
+                }
                 if (op._status === 'applied') return (
                   <div key={op.primary_rule_id} className="rounded-2xl border border-green-100 bg-green-50 px-4 py-3 flex items-center gap-2">
                     <span className="text-green-600">✓</span>
@@ -662,7 +744,7 @@ export default function HealthCheckPage() {
                           className="w-full bg-blue-400 text-white text-xs font-medium py-2 rounded-xl hover:bg-blue-500 active:scale-95 transition-all disabled:opacity-40">
                           保留舊規則，停用新規則
                         </button>
-                        <button onClick={() => handleBothKeepPendingReview(op)}
+                        <button onClick={() => handleBothKeepAndEdit(op)}
                           className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-medium py-2 rounded-xl hover:bg-gray-50 active:scale-95 transition-all">
                           兩筆都保留，標記待確認
                         </button>
@@ -815,7 +897,7 @@ export default function HealthCheckPage() {
                             className="w-full bg-orange-500 text-white text-xs font-medium py-2 rounded-xl hover:bg-orange-600 active:scale-95 transition-all disabled:opacity-40">
                             保留舊規則，刪除新規則
                           </button>
-                          <button onClick={() => handleBothKeepPendingReview(op)}
+                          <button onClick={() => handleBothKeepAndEdit(op)}
                             className="w-full bg-white border border-gray-300 text-gray-700 text-xs font-medium py-2 rounded-xl hover:bg-gray-50 active:scale-95 transition-all">
                             兩筆都保留，標記待確認
                           </button>

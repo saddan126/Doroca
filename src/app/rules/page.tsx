@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import AiEditBlock, { RuleSnapshot } from '@/components/AiEditBlock'
 
 type Alert = {
   level: 'red' | 'orange' | 'yellow' | 'blue' | 'gray'
@@ -18,11 +19,20 @@ type RuleHealth = {
   card_name: string
   bank_name: string
   valid_to: string | null
+  valid_from: string | null
   source_updated_at: string | null
   review_status: string | null
   confidence: string | null
   source_url: string | null
   review_note: string | null
+  reward_type: string | null
+  reward_rate: number | null
+  reward_fixed_amount: number | null
+  min_spending: number | null
+  reward_cap_amount: number | null
+  reward_cap_cycle: string | null
+  requires_registration: string | null
+  notes: string | null
   alerts: Alert[]
 }
 
@@ -115,6 +125,12 @@ export default function RulesPage() {
   const [selectedCardId, setSelectedCardId] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'needs_review' | 'human_reviewed'>('all')
   const [alertFilters, setAlertFilters] = useState<Set<string>>(new Set())
+  const [openEditId, setOpenEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<Partial<RuleHealth>>({})
+  const [editSaving, setEditSaving] = useState(false)
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ruleRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
     supabase.from('cards').select('card_id, card_name, banks(bank_name)').eq('status', 'active').order('card_name')
@@ -134,8 +150,10 @@ export default function RulesPage() {
       const { data, error } = await supabase
         .from('offer_rules')
         .select(`
-          rule_id, card_id, rule_name, valid_to, source_updated_at,
+          rule_id, card_id, rule_name, valid_to, valid_from, source_updated_at,
           review_status, confidence, source_url, review_note,
+          reward_type, reward_rate, reward_fixed_amount, min_spending,
+          reward_cap_amount, reward_cap_cycle, requires_registration, notes,
           cards ( card_name, banks ( bank_name ) )
         `)
         .order('rule_id')
@@ -160,6 +178,15 @@ export default function RulesPage() {
           confidence: r.confidence ?? null,
           source_url: r.source_url ?? null,
           review_note: (r as unknown as { review_note?: string | null }).review_note ?? null,
+          reward_type: (r as unknown as { reward_type?: string | null }).reward_type ?? null,
+          reward_rate: (r as unknown as { reward_rate?: number | null }).reward_rate ?? null,
+          reward_fixed_amount: (r as unknown as { reward_fixed_amount?: number | null }).reward_fixed_amount ?? null,
+          min_spending: (r as unknown as { min_spending?: number | null }).min_spending ?? null,
+          reward_cap_amount: (r as unknown as { reward_cap_amount?: number | null }).reward_cap_amount ?? null,
+          reward_cap_cycle: (r as unknown as { reward_cap_cycle?: string | null }).reward_cap_cycle ?? null,
+          requires_registration: (r as unknown as { requires_registration?: string | null }).requires_registration ?? null,
+          valid_from: (r as unknown as { valid_from?: string | null }).valid_from ?? null,
+          notes: (r as unknown as { notes?: string | null }).notes ?? null,
         }
         return { ...base, alerts: calcAlerts(base, today) }
       })
@@ -172,6 +199,29 @@ export default function RulesPage() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const editId = params.get('edit')
+    if (!editId) return
+    const tryOpen = () => {
+      const found = rules.find(r => r.rule_id === editId)
+      if (found) {
+        openEdit(found)
+        setTimeout(() => {
+          ruleRefs.current[editId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 100)
+      }
+    }
+    if (rules.length > 0) tryOpen()
+  }, [rules])
+
+  function showToast(msg: string) {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(''), 3000)
+  }
 
   function toggleAlertFilter(key: string) {
     setAlertFilters(prev => {
@@ -193,6 +243,40 @@ export default function RulesPage() {
   })
 
   const hasActiveFilters = selectedCardId || statusFilter !== 'all' || alertFilters.size > 0
+
+  function openEdit(rule: RuleHealth) {
+    setOpenEditId(rule.rule_id)
+    setEditForm({
+      rule_name: rule.rule_name,
+      reward_type: rule.reward_type,
+      reward_rate: rule.reward_rate,
+      reward_fixed_amount: rule.reward_fixed_amount,
+      min_spending: rule.min_spending,
+      reward_cap_amount: rule.reward_cap_amount,
+      reward_cap_cycle: rule.reward_cap_cycle,
+      requires_registration: rule.requires_registration,
+      valid_from: rule.valid_from,
+      valid_to: rule.valid_to,
+      notes: rule.notes,
+    })
+  }
+
+  async function handleEditSave(ruleId: string) {
+    setEditSaving(true)
+    const today = new Date().toISOString().split('T')[0]
+    const { error } = await supabase.from('offer_rules')
+      .update({ ...editForm, source_updated_at: today })
+      .eq('rule_id', ruleId)
+    if (error) { alert(`儲存失敗：${error.message}`); setEditSaving(false); return }
+    setRules(prev => prev.map(r => {
+      if (r.rule_id !== ruleId) return r
+      const updated = { ...r, ...editForm, source_updated_at: today }
+      return { ...updated, alerts: calcAlerts(updated, today) }
+    }))
+    setOpenEditId(null)
+    showToast('已儲存')
+    setEditSaving(false)
+  }
 
   async function handleDeleteRule(ruleId: string, ruleName: string) {
     if (!window.confirm(`確定刪除「${ruleName}」嗎？此操作無法復原。`)) return
@@ -220,6 +304,11 @@ export default function RulesPage() {
   return (
     <main className="min-h-screen bg-gray-50">
       <div className="max-w-lg mx-auto px-4 py-8">
+        {toast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg whitespace-nowrap">
+            {toast}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-bold text-gray-900">規則健康度</h1>
           <div className="flex gap-2">
@@ -325,7 +414,11 @@ export default function RulesPage() {
               displayed.map((rule) => {
                 const top = topLevel(rule.alerts)
                 return (
-                  <div key={rule.rule_id} className={`rounded-2xl border p-4 ${ALERT_BORDER[top]}`}>
+                  <div
+                    key={rule.rule_id}
+                    ref={el => { ruleRefs.current[rule.rule_id] = el }}
+                    className={`rounded-2xl border p-4 ${ALERT_BORDER[top]}`}
+                  >
                     <p className="text-xs text-gray-500">{rule.bank_name}</p>
                     <p className="text-sm font-semibold text-gray-900 mt-0.5">{rule.card_name}</p>
                     <p className="text-sm text-gray-700 mt-0.5">{rule.rule_name}</p>
@@ -376,6 +469,116 @@ export default function RulesPage() {
                         🗑
                       </button>
                     </div>
+
+                    {/* Edit toggle */}
+                    <button
+                      onClick={() => openEditId === rule.rule_id ? setOpenEditId(null) : openEdit(rule)}
+                      className="mt-2 text-xs text-gray-400 hover:text-gray-600 underline"
+                    >
+                      {openEditId === rule.rule_id ? '收起編輯' : '編輯此規則'}
+                    </button>
+
+                    {openEditId === rule.rule_id && (
+                      <div className="mt-3 border-t border-gray-200 pt-3 space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">活動名稱</label>
+                          <input type="text" value={editForm.rule_name ?? ''} onChange={e => setEditForm(p => ({ ...p, rule_name: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">回饋類型</label>
+                          <select value={editForm.reward_type ?? ''} onChange={e => setEditForm(p => ({ ...p, reward_type: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="cashback">現金回饋</option>
+                            <option value="points">點數回饋</option>
+                            <option value="fixed_amount">固定回饋金額</option>
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">回饋率（0.01 = 1%）</label>
+                            <input type="number" step="0.001" value={editForm.reward_rate ?? ''} onChange={e => setEditForm(p => ({ ...p, reward_rate: e.target.value ? Number(e.target.value) : null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">固定回饋金額（NT$）</label>
+                            <input type="number" value={editForm.reward_fixed_amount ?? ''} onChange={e => setEditForm(p => ({ ...p, reward_fixed_amount: e.target.value ? Number(e.target.value) : null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">最低消費（NT$）</label>
+                            <input type="number" value={editForm.min_spending ?? ''} onChange={e => setEditForm(p => ({ ...p, min_spending: e.target.value ? Number(e.target.value) : null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">回饋上限（NT$）</label>
+                            <input type="number" value={editForm.reward_cap_amount ?? ''} onChange={e => setEditForm(p => ({ ...p, reward_cap_amount: e.target.value ? Number(e.target.value) : null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">上限週期</label>
+                          <select value={editForm.reward_cap_cycle ?? 'none'} onChange={e => setEditForm(p => ({ ...p, reward_cap_cycle: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="none">無上限</option>
+                            <option value="monthly">每月</option>
+                            <option value="monthly_statement">每月帳單</option>
+                            <option value="campaign">活動期間</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">是否需登錄</label>
+                          <select value={editForm.requires_registration ?? 'no'} onChange={e => setEditForm(p => ({ ...p, requires_registration: e.target.value }))}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="no">不需要</option>
+                            <option value="yes">需要</option>
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">活動開始</label>
+                            <input type="date" value={editForm.valid_from ?? ''} onChange={e => setEditForm(p => ({ ...p, valid_from: e.target.value || null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">活動結束</label>
+                            <input type="date" value={editForm.valid_to ?? ''} onChange={e => setEditForm(p => ({ ...p, valid_to: e.target.value || null }))}
+                              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
+                          <textarea value={editForm.notes ?? ''} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value || null }))} rows={2}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleEditSave(rule.rule_id)} disabled={editSaving}
+                            className="flex-1 bg-blue-600 text-white text-xs font-medium py-2 rounded-xl hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50">
+                            {editSaving ? '儲存中...' : '儲存'}
+                          </button>
+                          <button onClick={() => setOpenEditId(null)}
+                            className="px-4 bg-white border border-gray-200 text-gray-500 text-xs font-medium py-2 rounded-xl hover:bg-gray-50 transition-all">
+                            取消
+                          </button>
+                        </div>
+                        <AiEditBlock
+                          currentRule={{
+                            rule_id: rule.rule_id,
+                            rule_name: rule.rule_name,
+                            reward_type: rule.reward_type ?? '',
+                            reward_rate: rule.reward_rate,
+                            reward_fixed_amount: rule.reward_fixed_amount,
+                            min_spending: rule.min_spending,
+                            reward_cap_amount: rule.reward_cap_amount,
+                            notes: rule.notes,
+                          }}
+                          onShowToast={showToast}
+                          onComplete={() => setOpenEditId(null)}
+                        />
+                      </div>
+                    )}
                   </div>
                 )
               })
